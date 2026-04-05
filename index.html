@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Royal Memoria: Anime Quest</title>
+    <style>
+        :root { --gold: #ffd700; --royal: #4b0082; --accent: #ff4500; }
+        * { box-sizing: border-box; touch-action: manipulation; }
+        body {
+            margin: 0; background: #050510; color: white;
+            font-family: 'Trebuchet MS', sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; overflow: hidden;
+            background: radial-gradient(circle, #1a1a2e, #020205);
+        }
+        #game-stage {
+            width: 95%; max-width: 400px; padding: 15px;
+            border: 3px solid var(--gold); border-radius: 20px;
+            background: rgba(0,0,0,0.8); box-shadow: 0 0 40px var(--royal);
+            position: relative;
+        }
+        .hud {
+            display: grid; grid-template-columns: 1fr 1fr 1fr;
+            gap: 5px; margin-bottom: 15px; background: rgba(255,215,0,0.1);
+            padding: 10px; border-radius: 12px; border: 1px solid var(--gold);
+        }
+        .hud-item { text-align: center; }
+        .hud-item small { color: var(--gold); font-size: 10px; display: block; text-transform: uppercase; }
+        .hud-item b { font-size: 18px; }
+
+        .powers { display: flex; justify-content: space-around; margin-bottom: 15px; }
+        .p-btn {
+            background: var(--royal); border: 2px solid var(--gold); color: white;
+            padding: 8px 15px; border-radius: 10px; cursor: pointer; font-size: 12px;
+        }
+        .p-btn:disabled { opacity: 0.3; filter: grayscale(1); }
+
+        .grid { display: grid; gap: 8px; perspective: 1000px; }
+        .card { width: 100%; aspect-ratio: 1/1; cursor: pointer; position: relative; transform-style: preserve-3d; transition: transform 0.5s; }
+        .card.flipped { transform: rotateY(180deg); }
+        .card-f, .card-b {
+            position: absolute; width: 100%; height: 100%;
+            backface-visibility: hidden; border-radius: 8px; border: 2px solid var(--gold);
+        }
+        .card-f { background: linear-gradient(45deg, #222, #444); display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--gold); }
+        .card-b { background: #fff; transform: rotateY(180deg); display: flex; align-items: center; justify-content: center; padding: 5px; }
+        .card-b img { width: 100%; height: 100%; object-fit: contain; border-radius: 5px; }
+
+        #overlay {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background: rgba(0,0,0,0.95); z-index: 100; border-radius: 18px;
+            display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;
+        }
+        .start-btn {
+            background: var(--gold); color: black; border: none; padding: 15px 40px;
+            border-radius: 50px; font-weight: bold; font-size: 1.2rem; cursor: pointer;
+            box-shadow: 0 0 20px var(--gold); margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-stage">
+    <div id="overlay">
+        <h1 style="color:var(--gold); margin:0; letter-spacing: 2px;">ANIME ROYALE</h1>
+        <p style="color:#aaa; font-size: 12px;">HARDCORE MEMORY CHALLENGE</p>
+        <button class="start-btn" onclick="startGame()">ENTER QUEST</button>
+    </div>
+
+    <div class="hud">
+        <div class="hud-item"><small>Level</small><b id="lvl">1</b></div>
+        <div class="hud-item"><small>Time Left</small><b id="tmr" style="color:var(--accent);">35</b></div>
+        <div class="hud-item"><small>Pairs</small><b id="prs">0/4</b></div>
+    </div>
+
+    <div class="powers">
+        <button class="p-btn" id="eye" onclick="powerEye()">👁️ Eye (<span id="ec">2</span>)</button>
+        <button class="p-btn" id="frz" onclick="powerFreeze()">❄️ Freeze (<span id="fc">1</span>)</button>
+    </div>
+
+    <div id="board" class="grid"></div>
+</div>
+
+<script>
+    // Royal Anime Style Icons (Handpicked)
+    const animeIcons = [
+        'https://cdn-icons-png.flaticon.com/512/3252/3252906.png', // Anime Lion
+        'https://cdn-icons-png.flaticon.com/512/2991/2991612.png', // Magic Sword
+        'https://cdn-icons-png.flaticon.com/512/1152/1152912.png', // Royal Eagle
+        'https://cdn-icons-png.flaticon.com/512/2582/2582688.png', // Anime Crown
+        'https://cdn-icons-png.flaticon.com/512/4230/4230633.png', // Dragon Soul
+        'https://cdn-icons-png.flaticon.com/512/9135/9135334.png', // Magic Potion
+        'https://cdn-icons-png.flaticon.com/512/867/867855.png',   // Shield
+        'https://cdn-icons-png.flaticon.com/512/10433/10433048.png' // Knight Helmet
+    ];
+
+    let level = 1, timeLeft = 35, timer, pairsFound = 0, totalPairs = 0;
+    let eyeCount = 2, frzCount = 1, flipped = [], canPlay = true;
+    const audio = new (window.AudioContext || window.webkitAudioContext)();
+
+    // Professional Sounds Functions
+    function playSound(type) {
+        const osc = audio.createOscillator();
+        const gain = audio.createGain();
+        osc.connect(gain); gain.connect(audio.destination);
+        if(type === 'flip') { 
+            osc.type = 'square'; osc.frequency.setValueAtTime(150, audio.currentTime);
+            gain.gain.setValueAtTime(0.05, audio.currentTime); 
+            osc.frequency.exponentialRampToValueAtTime(40, audio.currentTime + 0.1);
+        } else if(type === 'match') {
+            osc.type = 'sine'; osc.frequency.setValueAtTime(500, audio.currentTime);
+            gain.gain.setValueAtTime(0.1, audio.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1000, audio.currentTime + 0.3);
+        }
+        osc.start(); osc.stop(audio.currentTime + 0.2);
+    }
+
+    function startGame() {
+        document.getElementById('overlay').style.display = 'none';
+        setupLevel();
+    }
+
+    function setupLevel() {
+        const board = document.getElementById('board');
+        board.innerHTML = ''; flipped = []; pairsFound = 0;
+        
+        // Increase Difficulty Scaling
+        totalPairs = Math.min(3 + level, 8);
+        timeLeft = (level % 3 === 0) ? 20 : 35; // Real Hard Mode every 3rd level
+        
+        document.getElementById('lvl').innerText = level;
+        document.getElementById('prs').innerText = `0/${totalPairs}`;
+        document.getElementById('tmr').innerText = timeLeft;
+
+        let pool = [...animeIcons.slice(0, totalPairs), ...animeIcons.slice(0, totalPairs)];
+        pool.sort(() => Math.random() - 0.5);
+
+        board.style.gridTemplateColumns = totalPairs > 5 ? "repeat(4, 1fr)" : "repeat(3, 1fr)";
+
+        pool.forEach(url => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `<div class="card-inner card"><div class="card-f">皇</div><div class="card-b"><img src="${url}"></div></div>`;
+            card.onclick = () => handleFlip(card, url);
+            board.appendChild(card);
+        });
+        startTimer();
+    }
+
+    function handleFlip(card, url) {
+        if(!canPlay || card.classList.contains('flipped') || flipped.length >= 2) return;
+        card.classList.add('flipped');
+        playSound('flip');
+        flipped.push({card, url});
+        if(flipped.length === 2) checkMatch();
+    }
+
+    function checkMatch() {
+        canPlay = false;
+        const [a, b] = flipped;
+        if(a.url === b.url) {
+            pairsFound++; playSound('match');
+            document.getElementById('prs').innerText = `${pairsFound}/${totalPairs}`;
+            flipped = []; canPlay = true;
+            if(pairsFound === totalPairs) win();
+        } else {
+            setTimeout(() => { a.card.classList.remove('flipped'); b.card.classList.remove('flipped'); flipped = []; canPlay = true; }, 600);
+        }
+    }
+
+    function powerEye() {
+        if(eyeCount <= 0) return;
+        eyeCount--; document.getElementById('ec').innerText = eyeCount;
+        const all = document.querySelectorAll('.card');
+        all.forEach(c => c.classList.add('flipped'));
+        canPlay = false;
+        setTimeout(() => {
+            all.forEach(c => { if(!c.dataset.matched) c.classList.remove('flipped'); });
+            canPlay = true;
+        }, 1200);
+        if(eyeCount === 0) document.getElementById('eye').disabled = true;
+    }
+
+    function powerFreeze() {
+        if(frzCount <= 0) return;
+        frzCount--; document.getElementById('fc').innerText = frzCount;
+        clearInterval(timer);
+        document.getElementById('tmr').style.color = '#00ffff';
+        setTimeout(() => { startTimer(); document.getElementById('tmr').style.color = 'var(--accent)'; }, 5000);
+        if(frzCount === 0) document.getElementById('frz').disabled = true;
+    }
+
+    function win() {
+        clearInterval(timer);
+        setTimeout(() => {
+            level++; eyeCount = 2; frzCount = 1;
+            document.getElementById('eye').disabled = false;
+            document.getElementById('frz').disabled = false;
+            document.getElementById('ec').innerText = 2;
+            document.getElementById('fc').innerText = 1;
+            setupLevel();
+        }, 500);
+    }
+
+    function startTimer() {
+        clearInterval(timer);
+        timer = setInterval(() => {
+            timeLeft--;
+            document.getElementById('tmr').innerText = timeLeft;
+            if(timeLeft <= 0) { clearInterval(timer); alert("DEFEAT! Start from Level 1."); location.reload(); }
+        }, 1000);
+    }
+</script>
+</body>
+</html>
